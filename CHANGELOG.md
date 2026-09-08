@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- A manual `schedule.run` that attaches a run satisfies the next natural fire, so manually-run schedules no longer double-fire (#2052). Thanks to [@brandonmwest](https://github.com/brandonmwest) for #2052.
+
 ## [0.66.0] - 2026-09-06
 
 ### Highlights
