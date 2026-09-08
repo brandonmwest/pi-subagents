@@ -690,7 +690,34 @@ export class ScheduledRunManager {
 			return textResult(`Skipped schedule ${schedule.id}: current session is not its owner.`, [schedule]);
 		}
 		const run = await this.launch(store, schedule, this.now(), "manual", false);
-		return textResult(`Manual schedule run ${run.id}: ${run.state}${run.asyncId ? ` (async ${run.asyncId})` : ""}.`, [store.get(schedule.id)], [run], run.state === "failed_launch");
+		const updated = store.get(schedule.id);
+		// A manual launch that actually ran satisfies the schedule's next
+		// natural fire: interval schedules defer a full interval, one-shot
+		// schedules are consumed so their own trigger never fires. Overlap-skipped
+		// and failed manual launches leave the natural cadence untouched.
+		if (run.state === "running") this.satisfyManualLaunch(store, updated);
+		return textResult(`Manual schedule run ${run.id}: ${run.state}${run.asyncId ? ` (async ${run.asyncId})` : ""}.\nNext natural fire: ${updated.trigger.nextRunAt ?? "none (schedule satisfied)"}.`, [store.get(schedule.id)], [run], run.state === "failed_launch");
+	}
+
+	/**
+	 * A manual launch satisfies the schedule's next natural fire: interval
+	 * schedules advance nextRunAt a full interval from the manual launch, and
+	 * one-shot schedules clear nextRunAt so their natural trigger never fires.
+	 * Natural fires (timer/run-due) are unaffected.
+	 */
+	private satisfyManualLaunch(store: ScheduleStore, schedule: ScheduleRecord): void {
+		const now = this.now();
+		if (schedule.trigger.kind === "interval") {
+			// Equivalent to nextAfter(trigger, now, now): now + everyMs is already
+			// strictly in the future, so no catch-up stepping applies.
+			schedule.trigger.nextRunAt = timestamp(now + schedule.trigger.everyMs);
+		} else {
+			schedule.trigger.nextRunAt = undefined;
+		}
+		schedule.updatedAt = timestamp(now);
+		store.write(schedule);
+		store.appendEvent(schedule, "schedule.manual_satisfied");
+		this.arm(schedule, store);
 	}
 
 	private async runDue(): Promise<AgentToolResult<Details>> {
